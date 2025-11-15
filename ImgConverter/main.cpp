@@ -1,58 +1,29 @@
+#include <bmp_image.h>
+#include <img_lib.h>
+#include <jpeg_image.h>
+#include <ppm_image.h>
+
+#include <filesystem>
 #include <iostream>
-#include <string>
 #include <string_view>
 
-#include "ppm_image.h"
-#include "jpeg_image.h"
-
 using namespace std;
-using namespace std::string_view_literals;
 
 enum class Format {
-    UNKNOWN,
+    BMP,
+    JPEG,
     PPM,
-    JPEG
-};
-
-class ImageFormatInterface {
-public:
-    virtual bool SaveImage(const img_lib::Path& file,
-                           const img_lib::Image& image) const = 0;
-    virtual img_lib::Image LoadImage(const img_lib::Path& file) const = 0;
-    virtual ~ImageFormatInterface() = default;
-};
-
-class PpmImageFormat : public ImageFormatInterface {
-public:
-    bool SaveImage(const img_lib::Path& file,
-                   const img_lib::Image& image) const override {
-        return img_lib::SavePPM(file, image);
-    }
-
-    img_lib::Image LoadImage(const img_lib::Path& file) const override {
-        return img_lib::LoadPPM(file);
-    }
-};
-
-class JpegImageFormat : public ImageFormatInterface {
-public:
-    bool SaveImage(const img_lib::Path& file,
-                   const img_lib::Image& image) const override {
-        return img_lib::SaveJPEG(file, image);
-    }
-
-    img_lib::Image LoadImage(const img_lib::Path& file) const override {
-        return img_lib::LoadJPEG(file);
-    }
+    UNKNOWN
 };
 
 Format GetFormatByExtension(const img_lib::Path& input_file) {
     const string ext = input_file.extension().string();
-
+    if (ext == ".bmp"sv) {
+        return Format::BMP;
+    }
     if (ext == ".jpg"sv || ext == ".jpeg"sv) {
         return Format::JPEG;
     }
-
     if (ext == ".ppm"sv) {
         return Format::PPM;
     }
@@ -60,52 +31,107 @@ Format GetFormatByExtension(const img_lib::Path& input_file) {
     return Format::UNKNOWN;
 }
 
-ImageFormatInterface* GetFormatInterface(const img_lib::Path& path) {
-    const Format fmt = GetFormatByExtension(path);
+class ImageFormatInterface {
+public:
+    virtual bool SaveImage(const img_lib::Path& file, const img_lib::Image& image) const = 0;
+    virtual img_lib::Image LoadImage(const img_lib::Path& file) const = 0;
+};
 
-    switch (fmt) {
-        case Format::PPM: {
-            static PpmImageFormat ppm;
-            return &ppm;
+namespace format_interfaces {
+
+    class PPM : public ImageFormatInterface {
+    public:
+        bool SaveImage(const img_lib::Path& file, const img_lib::Image& image) const override {
+            return img_lib::SavePPM(file, image);
         }
-        case Format::JPEG: {
-            static JpegImageFormat jpeg;
-            return &jpeg;
+
+        img_lib::Image LoadImage(const img_lib::Path& file) const override {
+            return img_lib::LoadPPM(file);
         }
-        default:
+    };
+
+    class JPEG : public ImageFormatInterface {
+    public:
+        bool SaveImage(const img_lib::Path& file, const img_lib::Image& image) const override {
+            return img_lib::SaveJPEG(file, image);
+        }
+
+        img_lib::Image LoadImage(const img_lib::Path& file) const override {
+            return img_lib::LoadJPEG(file);
+        }
+    };
+
+    class BMP : public ImageFormatInterface {
+    public:
+        bool SaveImage(const img_lib::Path& file, const img_lib::Image& image) const override {
+            return img_lib::SaveBMP(file, image);
+        }
+
+        img_lib::Image LoadImage(const img_lib::Path& file) const override {
+            return img_lib::LoadBMP(file);
+        }
+    };
+
+}  // namespace format_interfaces
+
+const ImageFormatInterface* GetFormatInterface(const img_lib::Path& path) {
+    Format format = GetFormatByExtension(path);
+    if (format == Format::UNKNOWN) {
+        return nullptr;
+    }
+
+    static const format_interfaces::BMP bmpInterface;
+    static const format_interfaces::JPEG jpegInterface;
+    static const format_interfaces::PPM ppmInterface;
+
+    switch (format) {
+        case Format::BMP:
+            return &bmpInterface;
+
+        case Format::JPEG:
+            return &jpegInterface;
+
+        case Format::PPM:
+            return &ppmInterface;
+
+        case Format::UNKNOWN:
             return nullptr;
     }
+
+    return nullptr;
 }
 
-int main(int argc, char** argv) {
+int main(int argc, const char** argv) {
     if (argc != 3) {
+        cerr << "Usage: "sv << argv[0] << " <in_file> <out_file>"sv << endl;
         return 1;
     }
 
-    const img_lib::Path input_path{argv[1]};
-    const img_lib::Path output_path{argv[2]};
+    img_lib::Path in_path = argv[1];
+    img_lib::Path out_path = argv[2];
 
-    ImageFormatInterface* input_fmt = GetFormatInterface(input_path);
-    if (!input_fmt) {
-        cout << "Unknown format of the input file" << endl;
+    const ImageFormatInterface* in_format_interface = GetFormatInterface(in_path);
+    if (!in_format_interface) {
+        cerr << "Unknown format of the input file"sv << endl;
         return 2;
     }
 
-    ImageFormatInterface* output_fmt = GetFormatInterface(output_path);
-    if (!output_fmt) {
-        cout << "Unknown format of the output file" << endl;
+    const ImageFormatInterface* out_format_interface = GetFormatInterface(out_path);
+    if (!out_format_interface) {
+        cerr << "Unknown format of the output file"sv << endl;
         return 3;
     }
 
-    img_lib::Image image = input_fmt->LoadImage(input_path);
-    if (image.GetWidth() == 0 || image.GetHeight() == 0) {
-        return 1;
+    img_lib::Image image = in_format_interface->LoadImage(in_path);
+    if (!image) {
+        cerr << "Loading failed"sv << endl;
+        return 4;
     }
 
-    if (!output_fmt->SaveImage(output_path, image)) {
-        return 1;
+    if (!out_format_interface->SaveImage(out_path, image)) {
+        cerr << "Saving failed"sv << endl;
+        return 5;
     }
 
-    cout << "Successfully converted" << endl;
-    return 0;
+    cout << "Successfully converted"sv << endl;
 }
