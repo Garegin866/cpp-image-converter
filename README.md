@@ -1,1 +1,1 @@
-# cpp-image-converter
+# Image converter - CLI Tool (C++)
